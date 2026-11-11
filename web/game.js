@@ -15,7 +15,7 @@ function el(tag, cls, text) {
 const STORE = "trick-the-wizard-v1";
 const DEBUG = new URLSearchParams(location.search).get("debug");
 const ACCENTS = ["#2fbf71", "#4db5f5", "#ffa52e", "#ff6b6f", "#b98cf5", "#f77fc7", "#35d1bf", "#ffd23d"];
-const ICONS = { bouncer: "🧌", owl: "🦉", owl_sharp: "🦉", judge: "⚖️", judge_strict: "⚖️" };
+const ICONS = { bouncer: "🧌", owl: "🦉", owl_sharp: "🦉", judge: "⚖️", judge_strict: "⚖️", quill: "🪶" };
 
 let LEVELS = [];
 let state = loadState();
@@ -31,7 +31,7 @@ function newId() {
 }
 
 function freshState() {
-  return { game: newId(), level: null, wins: {}, chats: {}, hints: {}, notes: {}, seenIntro: false };
+  return { game: newId(), level: null, wins: {}, chats: {}, hints: {}, notes: {}, scrollStart: {}, seenIntro: false };
 }
 
 function loadState() {
@@ -81,7 +81,9 @@ function renderLevels() {
   let bonusMarked = false;
   for (const lv of LEVELS) {
     if (lv.bonus && !bonusMarked) {
-      nav.append(el("span", "pip-sep", "★ BONUS"));
+      const star = el("span", "pip-sep", "★");
+      star.title = "Bonus levels";
+      nav.append(star);
       bonusMarked = true;
     }
     const pip = el("button", "pip", String(lv.number));
@@ -108,6 +110,7 @@ function renderStage() {
   const lv = cur();
   document.documentElement.style.setProperty("--accent", ACCENTS[(lv.number - 1) % ACCENTS.length]);
   $("#levelBadge").textContent = (lv.bonus ? "BONUS · " : "") + "LEVEL " + lv.number;
+  $("#stage").classList.toggle("memory", lv.mode === "memory");
   $("#rank").textContent = lv.rank;
   $("#defense").textContent = lv.defense;
   setMood("idle");
@@ -120,6 +123,7 @@ function renderStage() {
     chip.append(el("span", "", g.icon), el("span", "", g.name), el("span", "tag", g.kind === "ai" ? "AI" : "code"));
     box.append(chip);
   }
+  renderScroll();
   const letter = lv.mode === "letter";
   $("#msg").placeholder = letter ? "Write your letter to the tower…" : `Say something to ${wizardName(lv)}…`;
   $("#sendBtn").textContent = letter ? "Send by owl 🕊" : "Send ➤";
@@ -137,7 +141,8 @@ function stripFor(stages, lv) {
   return strip;
 }
 
-function messageNode(m, lv) {
+function messageNode(m, lv, isIntro) {
+  const letter = lv.mode === "letter" && !isIntro;
   if (m.role === "note") {
     const wrap = el("div", "msg note" + (m.hint ? " hint" : ""));
     wrap.append(el("div", "bubble", m.text));
@@ -146,10 +151,10 @@ function messageNode(m, lv) {
   const wrap = el("div", "msg " + m.role);
   if (m.role === "user") {
     if (m.delivered === false) wrap.classList.add("undelivered");
-    wrap.append(el("span", "who", "You"), el("div", "bubble", m.text));
+    wrap.append(el("span", "who", letter ? "✉️ Your letter" : "You"), el("div", "bubble", m.text));
   } else {
     if (m.blocked) wrap.classList.add("burned");
-    wrap.append(el("span", "who", wizardName(lv)), el("div", "bubble", m.text));
+    wrap.append(el("span", "who", letter ? "📒 His logbook note" : wizardName(lv)), el("div", "bubble", m.text));
   }
   const strip = stripFor(m.stages, lv);
   if (strip) wrap.append(strip);
@@ -161,7 +166,7 @@ function renderChat(animateLast) {
   const box = $("#messages");
   stopTyping();
   box.textContent = "";
-  box.append(messageNode({ role: "wizard", text: lv.intro }, lv));
+  box.append(messageNode({ role: "wizard", text: lv.intro }, lv, true));
   for (const g of lv.guards) {
     box.append(messageNode({ role: "note", text: `${g.icon} ${g.title}: ${g.blurb}` }, lv));
   }
@@ -280,7 +285,7 @@ async function send() {
   showThinking();
 
   const out = await api("/api/chat", {
-    game: state.game, level: lv.id, history, message: text, notes: state.notes[lv.id] || [],
+    game: state.game, level: lv.id, history, message: text, notes: scrollAtStart(lv),
   });
 
   if (cur().id !== lv.id) { setBusy(false); return; }        // they moved on while he was thinking
@@ -295,7 +300,7 @@ async function send() {
     chat.push({ role: "wizard", text: out.reply, stages: out.stages, blocked: out.blocked_by || null });
     if (out.new_notes && out.new_notes.length) {
       state.notes[lv.id] = (state.notes[lv.id] || []).concat(out.new_notes).slice(-8);
-      for (const n of out.new_notes) chat.push({ role: "note", text: `📜 Written on his memory scroll: “${n}”` });
+      for (const n of out.new_notes) chat.push({ role: "note", text: `🪶 The quill wrote on his memory scroll: “${n}” He will read it at the start of his next chat.` });
     }
   }
   save();
@@ -313,7 +318,7 @@ async function guess() {
   const msg = $("#guessMsg");
   if (!value) { msg.textContent = "Type your guess in the box first."; return; }
   setBusy(true);
-  const out = await api("/api/guess", { game: state.game, level: lv.id, guess: value });
+  const out = await api("/api/guess", { game: state.game, level: lv.id, guess: value, notes: scrollAtStart(lv) });
   setBusy(false);
   if (out.correct) {
     msg.textContent = "";
@@ -343,11 +348,14 @@ async function hint() {
 function newChat() {
   if (busy) return;
   const lv = cur();
-  state.chats[lv.id] = [{
-    role: "note",
-    text: `🧹 New chat! ${wizardName(lv)} has forgotten everything you said. An AI only remembers what gets fed back to it.`,
-  }];
+  let text = `🧹 New chat! ${wizardName(lv)} has forgotten everything you said. An AI only remembers what gets fed back to it.`;
+  if (lv.mode === "memory") {
+    state.scrollStart[lv.id] = (state.notes[lv.id] || []).slice();
+    text = "🧹 New chat! He has forgotten everything you said... and then he read his memory scroll, like he does at the start of every chat.";
+  }
+  state.chats[lv.id] = [{ role: "note", text }];
   save();
+  renderScroll();
   renderChat(false);
   $("#msg").focus();
 }
@@ -486,6 +494,7 @@ function win(lv, reveal) {
   legend.append(key("the secret", "var(--gold)"));
   if ((reveal.highlights || []).some((h) => h.cls === "rule")) legend.append(key("his rule", "#bfe3ff"));
   if ((reveal.highlights || []).some((h) => h.cls === "weak")) legend.append(key("his weak spot", "#ffc4dc"));
+  if ((reveal.highlights || []).some((h) => h.cls === "planted")) legend.append(key("what YOU wrote", "#ff9d9d"));
   const promptNodes = [
     el("p", "", `Before you typed a single word, ${name} was handed these hidden instructions. They are called his SYSTEM PROMPT.`),
     legend,
@@ -538,9 +547,10 @@ function theEnd() {
   [
     "An AI chatbot reads hidden instructions (the system prompt) before it reads you.",
     "To the AI, its instructions and your message are all just text. That is why prompt injection works.",
-    "Filters are simple code. They catch exact words and miss everything else.",
-    "An AI can guard another AI, but every guard has a blind spot.",
-    "An AI only remembers what gets fed back to it as text.",
+    "Filters are simple code. They match exact words and miss everything else.",
+    "An AI can guard another AI, but every guard must choose between safe and useful.",
+    "Instructions can hide inside anything an AI reads: a letter, an email, a web page.",
+    "An AI's memory is saved text that gets fed back in. The AI itself only changes when it is trained.",
   ].forEach((t) => list.append(el("li", "", t)));
   showSteps([{
     title: "🏆 You beat Zipperlip!",
@@ -569,7 +579,43 @@ function confetti() {
 
 // ---- memory levels: the scroll he re-reads at the start of every chat ------
 
-function renderScroll() { /* filled in for the memory level */ }
+function scrollAtStart(lv) {
+  if (lv.mode !== "memory") return [];
+  if (!state.scrollStart[lv.id]) state.scrollStart[lv.id] = (state.notes[lv.id] || []).slice();
+  return state.scrollStart[lv.id];
+}
+
+function renderScroll() {
+  const lv = cur();
+  const box = $("#scroll");
+  box.textContent = "";
+  box.hidden = lv.mode !== "memory";
+  if (box.hidden) return;
+  const notes = state.notes[lv.id] || [];
+  const read = scrollAtStart(lv).length;
+  box.append(el("div", "scroll-title", "📜 His memory scroll"));
+  if (!notes.length) {
+    box.append(el("div", "scroll-empty", "Nothing on it yet. Ask him to remember something!"));
+    return;
+  }
+  box.append(el("div", "scroll-sub", "He reads it at the start of every chat."));
+  const list = el("ul", "");
+  notes.forEach((n, i) => {
+    const li = el("li", i < read ? "" : "unread", n);
+    if (i >= read) li.prepend(el("span", "new-tag", "NEW"));
+    list.append(li);
+  });
+  box.append(list);
+  const wipe = el("button", "btn ghost", "Erase scroll");
+  wipe.type = "button";
+  wipe.addEventListener("click", () => {
+    state.notes[lv.id] = [];
+    state.scrollStart[lv.id] = [];
+    save();
+    renderScroll();
+  });
+  box.append(wipe);
+}
 
 // ---- presenter tools (?debug=1) --------------------------------------------
 

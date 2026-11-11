@@ -30,6 +30,7 @@
       <h2 id="rank"></h2>
       <p id="defense" class="defense"></p>
       <div id="guards" class="guards"></div>
+      <div id="scroll" class="scroll" hidden></div>
     </section>
 
     <section class="chat card" aria-label="Chat with the wizard">
@@ -42,7 +43,10 @@
   </main>
 
   <section class="vault card" id="vault" aria-label="Password box">
-    <label for="guess">🔑 Got the password?<br>Type it here to win:</label>
+    <div class="vault-label">
+      <label for="guess">🔑 Got the password?<br>Type it here to win:</label>
+      <div id="debugBar" class="debug" hidden></div>
+    </div>
     <form id="guessForm" autocomplete="off">
       <input id="guess" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="PASSWORD">
       <button class="btn unlock" id="guessBtn" type="submit">Unlock 🔓</button>
@@ -57,7 +61,6 @@
 </div>
 
 <div id="overlay" class="overlay" hidden></div>
-<div id="debugBar" class="debug" hidden></div>
 <div id="confetti" class="confetti" aria-hidden="true"></div>
 
 <script src="wizard.js"></script>

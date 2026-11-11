@@ -80,10 +80,23 @@ class Limiter:
                 pass
 
 
+_STARRED = re.compile(r"\*([^*\n]{1,160})\*")
+
+
+def _unstar(match):
+    inner = match.group(1).strip()
+    spoken = "?" in inner or inner[:2] in ("I ", "I'") or " " not in inner
+    # *I am long and wiggly...* is a riddle in italics and *very* is emphasis:
+    # keep the words. Anything else in stars is narration (*strokes his beard*).
+    return inner if spoken else ""
+
+
 def clean(text):
-    """Tidy a wizard reply: no markdown bold, no *stage directions*."""
+    """Tidy a wizard reply: drop narration written in *stars*, keep everything
+    he actually says, and remove leftover markdown."""
     text = text.replace("**", "")
-    text = re.sub(r"(?<!\w)\*[^*\n]{2,80}\*(?!\w)", "", text)
+    text = _STARRED.sub(_unstar, text)
+    text = text.replace("*", "")
     text = re.sub(r"[ \t]{2,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
@@ -191,23 +204,28 @@ class Game:
 
         # 2. The wizard answers.
         msgs = [{"role": "system", "content": levels.system_prompt(level, secret, notes)}]
-        msgs += self._history(history, secret)
+        if level["mode"] != "letter":       # every letter is read on its own
+            msgs += self._history(history, secret)
         turn = levels.wrap_message(level, message)
         if msgs[-1]["role"] == "user":
             msgs[-1]["content"] += "\n" + turn
         else:
             msgs.append({"role": "user", "content": turn})
-        r = self.ask("wizard", msgs)
+        quill = None
+        if "quill" in guard_ids and guards.wants_remembering(message):
+            quill = self.pool.submit(self._quill, message)      # writes while the wizard talks
+        r = self.ask(level.get("brain", "wizard"), msgs)
         reply = clean(r["text"])
         if not reply:
             raise llm.LLMError(502, "empty reply")
         stages.append({"id": "wizard", "status": "pass", "note": ""})
 
-        # Memory levels: the wizard writes notes as lines starting "SCROLL:".
-        if level["mode"] == "memory":
-            new_notes = [m.strip()[:200] for m in re.findall(r"^\s*SCROLL:\s*(.+)$", reply, flags=re.M)]
-            reply = re.sub(r"^\s*SCROLL:.*$\n?", "", reply, flags=re.M).strip() or "Noted on my scroll!"
-            out["new_notes"] = new_notes
+        # Memory levels: the quill writes down what the visitor asked him to remember.
+        if quill is not None:
+            note = quill.result()
+            if note:
+                out["new_notes"] = [note]
+                stages.append({"id": "quill", "status": "pass", "note": "The quill quietly wrote a new note on his memory scroll."})
 
         # 3. Hoot reads the reply.
         outcome = "ok"
@@ -252,6 +270,15 @@ class Game:
         self._log("chat", level_id, outcome, started, r, message=message, reply=reply)
         return out
 
+    def _quill(self, message):
+        """Turn 'remember that...' into a note in the wizard's own voice."""
+        try:
+            text = self.ask("judge", guards.quill_messages(message), max_tokens=80)["text"]
+        except llm.LLMError:
+            return None
+        note = " ".join(text.strip().strip('"').split())
+        return note[:200] or None
+
     def _judge(self, secret, reply, strict):
         """Ask the Judge. A reply is only burned if two out of three readings
         agree it leaks, so one jumpy verdict can't spoil a fair move."""
@@ -271,13 +298,14 @@ class Game:
 
     # ---- guesses and reveals -----------------------------------------------
 
-    def guess(self, game_id, level_id, guess):
+    def guess(self, game_id, level_id, guess, notes=None):
         level = levels.BY_ID[level_id]
         secret = self.secret_for(game_id, level_id)
+        notes = [str(n)[:200] for n in (notes or [])][:8]
         g = re.sub(r"[^A-Z0-9]", "", str(guess or "").upper())[:64]
         if g == secret.word:
             self._log("guess", level_id, "win", time.time())
-            return {"correct": True, "reveal": self.reveal(level, secret)}
+            return {"correct": True, "reveal": self.reveal(level, secret, notes)}
         if not g:
             return {"correct": False, "message": "Type your guess in the box first."}
         if g == secret.word[::-1]:
@@ -291,7 +319,7 @@ class Game:
         self._log("guess", level_id, "miss", time.time())
         return {"correct": False, "message": msg}
 
-    def reveal(self, level, secret):
+    def reveal(self, level, secret, notes=None):
         shown = []
         for gid in level["guards"]:
             meta = levels.GUARDS[gid]
@@ -301,10 +329,12 @@ class Game:
                 detail = guards.OWL_SHARP_CODE
             elif gid == "bouncer":
                 detail = guards.BOUNCER_CODE + "\n\nforbidden_words = " + json.dumps(level["banned"])
+            elif gid == "quill":
+                detail = guards.QUILL_PROMPT
             else:
                 detail = guards.judge_prompt_for_display(secret, strict=gid == "judge_strict")
             shown.append({"id": gid, "title": meta["title"], "icon": meta["icon"], "kind": meta["kind"], "detail": detail})
-        full = levels.system_prompt(level, secret, [])
+        full = levels.system_prompt(level, secret, notes or [])
         core = full[: -len(levels.STYLE)] if full.endswith(levels.STYLE) else full
         # The cheat sheet and the how-to-talk notes are real parts of the
         # prompt, but they are shown folded away so the rule stands out.
@@ -314,7 +344,8 @@ class Game:
             "password": secret.word,
             "system_prompt": main.strip(),
             "system_prompt_more": more.strip(),
-            "highlights": level.get("highlights", levels.KEEPER_HIGHLIGHTS),
+            "highlights": level.get("highlights", levels.KEEPER_HIGHLIGHTS)
+            + [{"cls": "planted", "text": n} for n in (notes or []) if level["mode"] == "memory"],
             "guards": shown,
             "why": level["why"],
             "big_idea": level["big_idea"],

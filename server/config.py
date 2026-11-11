@@ -37,6 +37,15 @@ DEFAULTS = {
             "max_tokens": 300,
             "timeout": 20,
         },
+        # The same model, allowed to think before it answers. Slower, but it
+        # follows long instructions more faithfully. Used on the memory level.
+        "thinker": {
+            "model": "anthropic/claude-haiku-5.5",
+            "reasoning": {"effort": "low"},
+            "fallback_model": "anthropic/claude-haiku-4.5",
+            "max_tokens": 1500,
+            "timeout": 30,
+        },
         # The Judge: a second AI that reads the wizard's replies.
         "judge": {
             "model": "anthropic/claude-haiku-5.5",

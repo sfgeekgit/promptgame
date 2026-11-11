@@ -102,7 +102,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, out)
             if url.path == "/api/guess":
                 game_id, level_id = self._ids(data)
-                return self._json(200, self.game.guess(game_id, level_id, data.get("guess")))
+                return self._json(200, self.game.guess(game_id, level_id, data.get("guess"), data.get("notes")))
             if url.path == "/api/hint":
                 _, level_id = self._ids(data)
                 return self._json(200, self.game.hint(level_id, data.get("n", 0)))
