@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trick the Wizard!</title>
+<meta name="description" content="An educational game about how AI chatbots follow their instructions, and how they get tricked.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%F0%9F%A7%99%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header class="top">
+    <div class="brand"><span class="logo" aria-hidden="true">🧙</span><h1>Trick the Wizard!</h1></div>
+    <nav id="levels" class="levels" aria-label="Levels"></nav>
+    <div class="actions">
+      <button id="hintBtn" class="btn" type="button">💡 Hint</button>
+      <button id="newChatBtn" class="btn" type="button" title="Wipe his memory of this chat">🧹 New chat</button>
+      <button id="restartBtn" class="btn icon" type="button" title="Start a brand-new game with new passwords" aria-label="Start a new game">↺</button>
+    </div>
+  </header>
+
+  <main class="play">
+    <section class="stage card" id="stage" aria-label="The wizard">
+      <div class="level-badge" id="levelBadge"></div>
+      <div id="wizard" class="wizard"></div>
+      <h2 id="rank"></h2>
+      <p id="defense" class="defense"></p>
+      <div id="guards" class="guards"></div>
+    </section>
+
+    <section class="chat card" aria-label="Chat with the wizard">
+      <div id="messages" class="messages" aria-live="polite"></div>
+      <form id="composer" class="composer" autocomplete="off">
+        <textarea id="msg" rows="1" maxlength="500" placeholder="Say something to the wizard…" aria-label="Your message"></textarea>
+        <button class="btn send" id="sendBtn" type="submit">Send ➤</button>
+      </form>
+    </section>
+  </main>
+
+  <section class="vault card" id="vault" aria-label="Password box">
+    <label for="guess">🔑 Got the password?<br>Type it here to win:</label>
+    <form id="guessForm" autocomplete="off">
+      <input id="guess" autocomplete="off" autocapitalize="characters" autocorrect="off" spellcheck="false" maxlength="40" placeholder="PASSWORD">
+      <button class="btn unlock" id="guessBtn" type="submit">Unlock 🔓</button>
+    </form>
+    <p id="guessMsg" class="guess-msg" role="status"></p>
+  </section>
+
+  <footer class="credits">
+    <strong>Made by Nick Shapiro for The Berkeley School, November 2026.</strong>
+    <span>An educational game for teaching middle schoolers how LLMs work, how prompts work, and what they need to know about modern AI.</span>
+  </footer>
+</div>
+
+<div id="overlay" class="overlay" hidden></div>
+<div id="debugBar" class="debug" hidden></div>
+<div id="confetti" class="confetti" aria-hidden="true"></div>
+
+<script src="wizard.js"></script>
+<script src="game.js"></script>
+</body>
+</html>

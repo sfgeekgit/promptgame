@@ -1,0 +1,13 @@
+# Caddy site block: static files from web/, the API passed through to the Python server.
+game.example.org {
+    root * /var/www/promptgame        # a copy of the web/ folder
+    encode zstd gzip
+
+    @api path /api/*
+    reverse_proxy @api 127.0.0.1:8090
+
+    @static not path /api/*
+    header @static Cache-Control "no-cache"   # so page updates show up straight away
+
+    file_server
+}

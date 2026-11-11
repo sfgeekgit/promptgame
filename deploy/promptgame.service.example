@@ -1,0 +1,21 @@
+# systemd unit for the game's API server. Copy to /etc/systemd/system/promptgame.service,
+# change USER and the path, then:  systemctl daemon-reload && systemctl enable --now promptgame
+[Unit]
+Description=Trick the Wizard (promptgame) API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=USER
+WorkingDirectory=/path/to/promptgame
+ExecStart=/usr/bin/python3 -m server
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+MemoryMax=300M
+
+[Install]
+WantedBy=multi-user.target
