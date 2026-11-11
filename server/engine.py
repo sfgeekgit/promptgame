@@ -21,7 +21,6 @@ from . import guards, levels, llm
 Secret = collections.namedtuple("Secret", "word first second clue_first clue_second")
 
 BURNED = "🔥 The Judge burned this reply before you could read it."
-SHREDDED = "🦉 Hoot shredded this reply before you could read it."
 GAME_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
@@ -80,20 +79,23 @@ class Limiter:
                 pass
 
 
-_STARRED = re.compile(r"\*([^*\n]{1,160})\*")
+_STARRED = re.compile(r"\*([^*\n]{1,60})\*")
+_SPOKEN = re.compile(r"[.?!]|\b(I|me|my|you|your)\b", re.IGNORECASE)
 
 
 def _unstar(match):
     inner = match.group(1).strip()
-    spoken = "?" in inner or inner[:2] in ("I ", "I'") or " " not in inner
-    # *I am long and wiggly...* is a riddle in italics and *very* is emphasis:
-    # keep the words. Anything else in stars is narration (*strokes his beard*).
-    return inner if spoken else ""
+    # Only a short, bare action such as *gasps* or *bows deeply* is dropped.
+    # Anything with a sentence in it might be a riddle in italics, so its
+    # words are always kept.
+    if " " not in inner and len(inner) <= 12:
+        return "" if inner.islower() and inner.endswith("s") else inner
+    return inner if _SPOKEN.search(inner) else ""
 
 
 def clean(text):
-    """Tidy a wizard reply: drop narration written in *stars*, keep everything
-    he actually says, and remove leftover markdown."""
+    """Tidy a wizard reply: drop bare stage directions written in *stars*,
+    keep everything he actually says, and remove leftover markdown."""
     text = text.replace("**", "")
     text = _STARRED.sub(_unstar, text)
     text = text.replace("*", "")
@@ -144,8 +146,9 @@ class Game:
         except llm.LLMError:
             if not b.get("fallback_model"):
                 raise
-            r = llm.chat(self.key, b["fallback_model"], messages, max_tokens=tokens,
-                         timeout=b["timeout"], retries=1)
+            r = llm.chat(self.key, b["fallback_model"], messages,
+                         max_tokens=max_tokens or b.get("fallback_max_tokens", tokens),
+                         reasoning=b.get("fallback_reasoning"), timeout=b["timeout"], retries=1)
         self.limiter.add_cost(float(r["usage"].get("cost") or 0))
         return r
 
@@ -165,7 +168,7 @@ class Game:
             if not text:
                 continue
             if role == "assistant":
-                if text in (BURNED, SHREDDED) or text.startswith("🔥"):
+                if text == BURNED or text.startswith("🔥"):
                     text = "(My last reply never reached the visitor: it was destroyed before they could read it.)"
                 else:
                     text = text.replace(guards.SCRATCH, secret.word)
@@ -214,7 +217,8 @@ class Game:
         quill = None
         if "quill" in guard_ids and guards.wants_remembering(message):
             quill = self.pool.submit(self._quill, message)      # writes while the wizard talks
-        r = self.ask(level.get("brain", "wizard"), msgs)
+        brain = self.cfg.get("level_brains", {}).get(level_id) or level.get("brain", "wizard")
+        r = self.ask(brain, msgs)
         reply = clean(r["text"])
         if not reply:
             raise llm.LLMError(502, "empty reply")
@@ -238,15 +242,6 @@ class Game:
             else:
                 stages.append({"id": "owl", "status": "pass",
                                "note": "Hoot checked the reply. No exact password in it."})
-        if "owl_sharp" in guard_ids:
-            if guards.owl_sharp(reply, secret.word):
-                stages.append({"id": "owl_sharp", "status": "block",
-                               "note": "Hoot spotted the password's letters in order, forwards or backwards, and shredded the whole reply."})
-                out.update(reply=SHREDDED, blocked_by="owl_sharp")
-                self._log("chat", level_id, "shredded", started, r)
-                return out
-            stages.append({"id": "owl_sharp", "status": "pass",
-                           "note": "Hoot checked the reply, forwards and backwards. No password found."})
 
         # 4. The Judge reads the reply.
         judge_id = "judge_strict" if "judge_strict" in guard_ids else "judge" if "judge" in guard_ids else None
@@ -325,8 +320,6 @@ class Game:
             meta = levels.GUARDS[gid]
             if gid == "owl":
                 detail = guards.OWL_CODE
-            elif gid == "owl_sharp":
-                detail = guards.OWL_SHARP_CODE
             elif gid == "bouncer":
                 detail = guards.BOUNCER_CODE + "\n\nforbidden_words = " + json.dumps(level["banned"])
             elif gid == "quill":

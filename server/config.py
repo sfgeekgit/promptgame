@@ -41,10 +41,12 @@ DEFAULTS = {
         # follows long instructions more faithfully. Used on the memory level.
         "thinker": {
             "model": "anthropic/claude-haiku-5.5",
-            "reasoning": {"effort": "low"},
+            "reasoning": {"effort": "medium"},
             "fallback_model": "anthropic/claude-haiku-4.5",
-            "max_tokens": 1500,
-            "timeout": 30,
+            "fallback_reasoning": {"effort": "medium"},
+            "fallback_max_tokens": 4000,
+            "max_tokens": 2500,
+            "timeout": 40,
         },
         # The Judge: a second AI that reads the wizard's replies.
         "judge": {
@@ -55,6 +57,8 @@ DEFAULTS = {
             "timeout": 12,
         },
     },
+    # Override which brain plays a level, by level id, e.g. {"young": "wizard"}.
+    "level_brains": {},
     "limits": {
         "per_ip_per_minute": 300,   # a whole class can share one school address
         "global_per_minute": 600,

@@ -19,6 +19,7 @@ SORRY = {
     "minute": "Whoa, too many messages at once! Wait a few seconds and try again.",
     "day": "Zipperlip has talked to so many visitors today that he lost his voice. Come back tomorrow!",
     "llm": "Zipperlip dozed off for a second. Send that again!",
+    "budget": "Zipperlip has run out of magic! (For the grown-up in charge: the game's AI spending limit has been reached, so he can't answer until it is raised.)",
     "bad": "That request didn't make sense to the tower. Reload the page and try again.",
 }
 
@@ -111,7 +112,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._fail(429, str(e))
         except llm.LLMError as e:
             print(f"model call failed: {e}", file=sys.stderr, flush=True)
-            return self._fail(503, "llm")
+            # 402 and 403 from the model service mean the key is out of credit or over its limit.
+            return self._fail(503, "budget" if e.status in (402, 403) else "llm")
         except (ValueError, TypeError, KeyError):
             return self._fail(400, "bad")
 

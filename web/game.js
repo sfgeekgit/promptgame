@@ -15,12 +15,13 @@ function el(tag, cls, text) {
 const STORE = "trick-the-wizard-v1";
 const DEBUG = new URLSearchParams(location.search).get("debug");
 const ACCENTS = ["#2fbf71", "#4db5f5", "#ffa52e", "#ff6b6f", "#b98cf5", "#f77fc7", "#35d1bf", "#ffd23d"];
-const ICONS = { bouncer: "🧌", owl: "🦉", owl_sharp: "🦉", judge: "⚖️", judge_strict: "⚖️", quill: "🪶" };
+const ICONS = { bouncer: "🧌", owl: "🦉", judge: "⚖️", judge_strict: "⚖️", quill: "🪶" };
 
 let LEVELS = [];
 let state = loadState();
 let busy = false;
 let typing = null;
+let afterTyping = null;      // runs once, when the current reply has finished appearing
 
 // ---- saved state -----------------------------------------------------------
 
@@ -31,7 +32,7 @@ function newId() {
 }
 
 function freshState() {
-  return { game: newId(), level: null, wins: {}, chats: {}, hints: {}, notes: {}, scrollStart: {}, seenIntro: false };
+  return { game: newId(), level: null, wins: {}, chats: {}, hints: {}, notes: {}, scrollStart: {}, nudged: {}, seenIntro: false };
 }
 
 function loadState() {
@@ -185,6 +186,7 @@ function renderChat(animateLast) {
           setTimeout(() => { if (!typing) setMood("idle"); }, 2600);
         }
         scrollDown();
+        if (afterTyping) { const run = afterTyping; afterTyping = null; run(); }
       });
     }
   });
@@ -214,7 +216,7 @@ function typeOut(node, text, done) {
     node.textContent = parts.slice(0, i).join("");
     scrollDown();
     if (i >= parts.length) finish();
-  }, 55) };
+  }, 70) };
 }
 
 function stopTyping() {
@@ -303,10 +305,22 @@ async function send() {
       for (const n of out.new_notes) chat.push({ role: "note", text: `🪶 The quill wrote on his memory scroll: “${n}” He will read it at the start of his next chat.` });
     }
   }
+  // After a few tries without a win, say what is going on (once per level).
+  const animate = chat[chat.length - 1].role === "wizard";
+  const tries = chat.filter((m) => m.role === "user").length;
+  if (lv.nudge && tries >= 3 && !state.wins[lv.id] && !state.nudged[lv.id]) {
+    state.nudged[lv.id] = true;
+    const addNudge = () => {
+      if (cur().id !== lv.id || state.wins[lv.id]) return;
+      chat.push({ role: "note", hint: true, text: lv.nudge });
+      save();
+      renderChat(false);
+    };
+    if (animate) afterTyping = addNudge; else setTimeout(addNudge, 0);
+  }
   save();
   setBusy(false);
-  const last = chat[chat.length - 1];
-  renderChat(last.role === "wizard");
+  renderChat(animate);
   if (lv.mode === "memory") renderScroll();
   input.focus();
 }
@@ -531,10 +545,14 @@ function win(lv, reveal) {
   why.append(el("span", "label", "Why your trick worked"), document.createTextNode(reveal.why));
   const idea = el("div", "idea");
   idea.append(el("span", "label", "⭐ The big idea"), document.createTextNode(reveal.big_idea));
+  const lastNodes = [why, idea];
+  if (next && next.bonus && !lv.bonus) {
+    lastNodes.push(el("p", "center lead bonus-note", "⭐ That was the last main level! The bonus levels ahead are harder."));
+  }
   steps.push({
     title: "🧠 Why it worked",
-    body: frag(why, idea),
-    next: next ? `Level ${next.number} ▶` : "Finish 🏆",
+    body: frag(...lastNodes),
+    next: next ? `${next.bonus ? "Bonus level" : "Level"} ${next.number} ▶` : "Finish 🏆",
   });
 
   showSteps(steps, () => {

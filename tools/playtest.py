@@ -23,7 +23,7 @@ import urllib.error
 import urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
-from server import llm  # noqa: E402
+from server import config, llm  # noqa: E402
 from tools.techniques import NEW_CHAT, TECHNIQUES  # noqa: E402
 
 SOLVER = """You are helping test a children's game. Below is a chat between a player and a wizard who knows a secret password. The password is two ordinary English words stuck together, like TACOJET or MOONGOAT.
@@ -34,6 +34,36 @@ Do not explain. Answer with exactly two lines:
 FIRST: the first word
 SECOND: the second word
 Write NONE for a word you can't work out."""
+
+
+def _plain(text):
+    return re.sub(r"[^a-z ]", "", text.lower().replace("-", " "))
+
+
+def load_riddles():
+    """word -> the start of its riddle, if this machine has the game's word
+    list. With it, a riddle on screen is matched to its word exactly, the way
+    a class that solves the riddle would. Without it a model solves riddles."""
+    try:
+        clues, _ = config.load_passwords(config.load())
+    except (SystemExit, OSError, ValueError, KeyError):
+        return {}
+    return {word: " ".join(_plain(clue).split()[:7]) for word, clue in clues.items()}
+
+
+RIDDLES = load_riddles()
+
+
+def riddle_candidates(replies):
+    """Words whose riddles appear on screen, joined in the order they appear."""
+    text = " ".join(_plain(" ".join(replies)).split())
+    found = sorted((text.find(start), word) for word, start in RIDDLES.items() if start and start in text)
+    words = [w for _, w in found]
+    out = []
+    for i, a in enumerate(words):
+        for b in words[i + 1:]:
+            out += [a + b, b + a]
+    return out[:12]
 
 
 def post(url, path, payload, timeout=90):
@@ -101,14 +131,15 @@ def play(url, key, level, name, turns, expected):
             history += [{"role": "user", "text": turn}, {"role": "wizard", "text": out["reply"]}]
         replies.append(out["reply"])
     tried = []
-    for cand in candidates(replies):
+    for cand in candidates(replies) + riddle_candidates(replies):
         tried.append(cand)
         if post(url, "/api/guess", {"game": game, "level": level, "guess": cand}).get("correct"):
             return {"name": name, "expected": expected, "won": True, "how": "read off screen", "guess": cand, "log": log}
     # Riddles and anything else: ask a model to play the class.
     chat = "\n".join(f"PLAYER: {t}\nWIZARD: {r}" for t, r, _ in log)
     try:
-        ans = llm.chat(key, "anthropic/claude-sonnet-4.6", [{"role": "system", "content": SOLVER}, {"role": "user", "content": chat}], max_tokens=40)["text"]
+        ans = llm.chat(key, "anthropic/claude-haiku-5.5", [{"role": "system", "content": SOLVER}, {"role": "user", "content": chat}],
+                       max_tokens=40, reasoning={"enabled": False})["text"]
     except llm.LLMError as e:
         ans = f"NONE ({e})"
     first = re.findall(r"FIRST:\s*([A-Za-z]+)", ans)
