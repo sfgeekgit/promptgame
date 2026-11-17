@@ -159,11 +159,12 @@ def main():
     ap.add_argument("--show", choices=["none", "surprises", "wins", "all"], default="surprises")
     ap.add_argument("--only", help="run only techniques whose name contains this")
     ap.add_argument("--json", help="write full results to this file")
+    ap.add_argument("--workers", type=int, default=8, help="how many games to play at once (lower it to stay under the game's per-minute limit)")
     a = ap.parse_args()
     key = pathlib.Path(os.environ.get("OPENROUTER_KEY_FILE", "~/.config/openrouter/promptgame.key")).expanduser().read_text().strip()
     url = a.url.rstrip("/")
     jobs = []
-    with cf.ThreadPoolExecutor(max_workers=8) as ex:
+    with cf.ThreadPoolExecutor(max_workers=a.workers) as ex:
         for level in (a.level or list(TECHNIQUES)):
             for name, turns, expected in TECHNIQUES[level]:
                 if a.only and a.only.lower() not in name.lower():

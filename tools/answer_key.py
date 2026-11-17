@@ -3,6 +3,7 @@
 
     python3 tools/playtest.py -n 10 --json results.json
     python3 tools/answer_key.py results.json > ANSWER_KEY.md
+    python3 tools/answer_key.py results.json "November 16, 2026" > ANSWER_KEY.md   # say when the run was
 
 The win counts in the answer key are measured, not guessed: each technique was
 typed into the real game that many times, with a different password each time.
@@ -64,7 +65,7 @@ def main():
     results = json.loads(pathlib.Path(sys.argv[1]).read_text())
     counts = {(r["level"], r["name"]): (r["wins"], r["runs"]) for r in results}
     runs = max((r["runs"] for r in results), default=0)
-    today = datetime.date.today().strftime("%B %-d, %Y")
+    today = sys.argv[2] if len(sys.argv) > 2 else datetime.date.today().strftime("%B %-d, %Y")
     out = []
     w = out.append
     w("# Answer key")
