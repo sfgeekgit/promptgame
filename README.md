@@ -58,7 +58,7 @@ Defaults are in `server/config.py`. To change any of them, put a JSON file at `~
 - `level_brains`: override which brain plays a level, for example `{"grand": "thinker"}`
 - `limits`: messages per minute per address and overall, and a daily cap
 - `debug_token`: the value `?debug=` must have (default `1`)
-- `log_messages`: set to `true` to store what players type and what the wizard answers. Off by default: only counts, timings and outcomes are kept.
+- `log_messages`: set to `true` to store what players type and what the wizard answers. Off by default: only the time, level, outcome, timing and cost of each message are kept. Either way, every log line carries a short anonymous tag for its game, so games can be counted and one game's messages read together. The log is `events.jsonl` in the data folder.
 
 Passwords come from `~/.config/promptgame/passwords.json`: a riddle for every word, and a list of two-word passwords for each level. Without that file the game uses `config/passwords.example.json`. Keep your real passwords out of the repository.
 

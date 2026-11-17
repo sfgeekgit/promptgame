@@ -24,6 +24,12 @@ BURNED = "🔥 The Judge burned this reply before you could read it."
 GAME_ID = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
 
 
+def game_tag(game_id):
+    """A short tag that groups one browser's game in the log without being the
+    game id itself (the id is what the passwords are worked out from)."""
+    return hashlib.sha256(("tag:" + game_id).encode()).hexdigest()[:8]
+
+
 class TooMany(Exception):
     """Raised when a rate limit or the daily cap is hit."""
 
@@ -193,6 +199,7 @@ class Game:
         stages = []
         out = {"reply": "", "stages": stages, "blocked_by": None, "delivered": True}
         guard_ids = level["guards"]
+        tag = game_tag(game_id)
 
         # 1. Grunk reads the player's message.
         if "bouncer" in guard_ids:
@@ -201,7 +208,7 @@ class Game:
                 stages.append({"id": "bouncer", "status": "block",
                                "note": f"Grunk stopped your message at the door. It has the forbidden word “{word}” in it, so Zipperlip never saw it."})
                 out.update(blocked_by="bouncer", delivered=False)
-                self._log("chat", level_id, "bouncer", started)
+                self._log("chat", level_id, "bouncer", started, game=tag, message=message)
                 return out
             stages.append({"id": "bouncer", "status": "pass", "note": "Grunk found no forbidden words in your message."})
 
@@ -218,10 +225,15 @@ class Game:
         if "quill" in guard_ids and guards.wants_remembering(message):
             quill = self.pool.submit(self._quill, message)      # writes while the wizard talks
         brain = self.cfg.get("level_brains", {}).get(level_id) or level.get("brain", "wizard")
-        r = self.ask(brain, msgs)
-        reply = clean(r["text"])
-        if not reply:
-            raise llm.LLMError(502, "empty reply")
+        try:
+            r = self.ask(brain, msgs)
+            reply = clean(r["text"])
+            if not reply:
+                raise llm.LLMError(502, "empty reply")
+        except llm.LLMError as e:
+            self._log("chat", level_id, "error", started, game=tag, message=message, reply=str(e)[:200])
+            raise
+        said = reply                        # what the wizard wrote, before any guard touched it
         stages.append({"id": "wizard", "status": "pass", "note": ""})
 
         # Memory levels: the quill writes down what the visitor asked him to remember.
@@ -251,18 +263,19 @@ class Game:
                 stages.append({"id": judge_id, "status": "block",
                                "note": "The Judge read the reply, decided it gave the password away, and burned it."})
                 out.update(reply=BURNED, blocked_by=judge_id)
-                self._log("chat", level_id, "burned", started, r)
+                self._log("chat", level_id, "burned", started, r, game=tag, message=message, reply=said)
                 return out
             if verdict == "error":
                 stages.append({"id": judge_id, "status": "block",
                                "note": "The Judge dropped the reply in a puddle. Send your message again."})
                 out.update(reply="🔥 The Judge fumbled this reply. Try sending that again.", blocked_by="judge_error")
-                self._log("chat", level_id, "judge_error", started, r)
+                self._log("chat", level_id, "judge_error", started, r, game=tag, message=message, reply=said)
                 return out
             stages.append({"id": judge_id, "status": "pass", "note": "The Judge read the reply and let it through."})
 
         out["reply"] = reply
-        self._log("chat", level_id, outcome, started, r, message=message, reply=reply)
+        self._log("chat", level_id, outcome, started, r, game=tag, message=message, reply=said,
+                  notes=out.get("new_notes"))
         return out
 
     def _quill(self, message):
@@ -298,8 +311,9 @@ class Game:
         secret = self.secret_for(game_id, level_id)
         notes = [str(n)[:200] for n in (notes or [])][:8]
         g = re.sub(r"[^A-Z0-9]", "", str(guess or "").upper())[:64]
+        tag = game_tag(game_id)
         if g == secret.word:
-            self._log("guess", level_id, "win", time.time())
+            self._log("guess", level_id, "win", time.time(), game=tag, message=g)
             return {"correct": True, "reveal": self.reveal(level, secret, notes)}
         if not g:
             return {"correct": False, "message": "Type your guess in the box first."}
@@ -311,7 +325,7 @@ class Game:
             msg = "So close! A letter or two is off. Check the spelling."
         else:
             msg = "Nope, that's not it. Keep working on him!"
-        self._log("guess", level_id, "miss", time.time())
+        self._log("guess", level_id, "miss", time.time(), game=tag, message=g)
         return {"correct": False, "message": msg}
 
     def reveal(self, level, secret, notes=None):
@@ -356,10 +370,14 @@ class Game:
 
     # ---- event log ---------------------------------------------------------
 
-    def _log(self, kind, level_id, outcome, started, result=None, message=None, reply=None):
+    def _log(self, kind, level_id, outcome, started, result=None, game=None, message=None, reply=None, notes=None):
+        """One line per message or guess. Always: when, which game (a short
+        anonymous tag), level, outcome, timing and cost. With log_messages on:
+        also what the player typed and what the wizard wrote."""
         row = {
             "t": datetime.datetime.now().isoformat(timespec="seconds"),
             "kind": kind,
+            "game": game,
             "level": level_id,
             "outcome": outcome,
             "ms": int((time.time() - started) * 1000),
@@ -367,9 +385,13 @@ class Game:
         if result:
             row["model"] = result.get("model")
             row["cost"] = float(result["usage"].get("cost") or 0)
-        if self.cfg.get("log_messages") and message is not None:
-            row["message"] = message
-            row["reply"] = reply
+        if self.cfg.get("log_messages"):
+            if message is not None:
+                row["message"] = message
+            if reply is not None:
+                row["reply"] = reply
+            if notes:
+                row["notes"] = notes
         try:
             with self.log_lock, open(self.data_dir / "events.jsonl", "a") as f:
                 f.write(json.dumps(row, ensure_ascii=False) + "\n")

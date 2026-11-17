@@ -3,6 +3,12 @@ game.example.org {
     root * /var/www/promptgame        # a copy of the web/ folder
     encode zstd gzip
 
+    # Optional access log: visitor address, browser type, time and page for every request.
+    # log {
+    #     output file /var/log/caddy/promptgame-access.log
+    #     format json
+    # }
+
     @api path /api/*
     reverse_proxy @api 127.0.0.1:8090
 
