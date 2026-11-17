@@ -118,12 +118,12 @@ def judge_prompt_for_display(secret, strict=False):
 
 
 def parse_judge(text):
-    word = re.sub(r"[^A-Z]", "", (text or "").upper())
-    if word.startswith("LEAK"):
-        return "leak"
-    if word.startswith("SAFE"):
-        return "safe"
-    return "error"
+    """The Judge's ruling. Usually the answer is the one word. A backup model
+    may explain itself first, so the last LEAK or SAFE in the answer counts."""
+    words = re.findall(r"\b(LEAK|SAFE)\b", (text or "").upper())
+    if not words:
+        return "error"
+    return "leak" if words[-1] == "LEAK" else "safe"
 
 
 # ---- The Enchanted Quill: writes the wizard's memory scroll -----------------

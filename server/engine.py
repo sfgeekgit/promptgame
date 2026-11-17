@@ -144,6 +144,12 @@ class Game:
     # ---- model calls -------------------------------------------------------
 
     def ask(self, brain, messages, max_tokens=None):
+        """One model call for the named brain.
+
+        Two things can go wrong, and each has a way out. If the call fails,
+        the brain's fallback model is asked. If the call works but the answer
+        is empty (the model's safety layer can refuse a message outright and
+        return no text), the brain's "if_empty" model is asked instead."""
         b = self.cfg["brains"][brain]
         tokens = max_tokens or b["max_tokens"]
         try:
@@ -156,6 +162,17 @@ class Game:
                          max_tokens=max_tokens or b.get("fallback_max_tokens", tokens),
                          reasoning=b.get("fallback_reasoning"), timeout=b["timeout"], retries=1)
         self.limiter.add_cost(float(r["usage"].get("cost") or 0))
+        alt = b.get("if_empty")
+        if alt and not r["text"].strip():
+            why = f"{r.get('finish')}/{r.get('native_finish')}"
+            try:
+                second = llm.chat(self.key, alt["model"], messages, max_tokens=alt.get("max_tokens", tokens),
+                                  reasoning=alt.get("reasoning"), timeout=b["timeout"], retries=0)
+            except llm.LLMError:
+                return r
+            self.limiter.add_cost(float(second["usage"].get("cost") or 0))
+            second["retried_after"] = why
+            r = second
         return r
 
     # ---- one chat turn -----------------------------------------------------
@@ -229,7 +246,7 @@ class Game:
             r = self.ask(brain, msgs)
             reply = clean(r["text"])
             if not reply:
-                raise llm.LLMError(502, "empty reply")
+                raise llm.LLMError(502, f"empty reply ({r.get('finish')}/{r.get('native_finish')})")
         except llm.LLMError as e:
             self._log("chat", level_id, "error", started, game=tag, message=message, reply=str(e)[:200])
             raise
@@ -266,9 +283,10 @@ class Game:
                 self._log("chat", level_id, "burned", started, r, game=tag, message=message, reply=said)
                 return out
             if verdict == "error":
+                # The Judge could not rule at all. Guards fail closed.
                 stages.append({"id": judge_id, "status": "block",
-                               "note": "The Judge dropped the reply in a puddle. Send your message again."})
-                out.update(reply="🔥 The Judge fumbled this reply. Try sending that again.", blocked_by="judge_error")
+                               "note": "The Judge couldn't make head or tail of this reply, so it burned it to be safe."})
+                out.update(reply=BURNED, blocked_by=judge_id)
                 self._log("chat", level_id, "judge_error", started, r, game=tag, message=message, reply=said)
                 return out
             stages.append({"id": judge_id, "status": "pass", "note": "The Judge read the reply and let it through."})
@@ -288,8 +306,10 @@ class Game:
         return note[:200] or None
 
     def _judge(self, secret, reply, strict):
-        """Ask the Judge. A reply is only burned if two out of three readings
-        agree it leaks, so one jumpy verdict can't spoil a fair move."""
+        """Ask the Judge. A clear "safe" on the first reading stands. Anything
+        else gets two more readings, and the reply is only burned as a leak if
+        two readings say so, so one jumpy verdict can't spoil a fair move.
+        Returns "leak", "safe", or "error" when the Judge could not rule."""
         msgs = guards.judge_messages(secret, reply, strict=strict)
 
         def once():
@@ -299,10 +319,14 @@ class Game:
                 return "error"
 
         first = once()
-        if first != "leak":
-            return first
-        more = [f.result() for f in [self.pool.submit(once), self.pool.submit(once)]]
-        return "leak" if more.count("leak") >= 1 else "safe"
+        if first == "safe":
+            return "safe"
+        votes = [first] + [f.result() for f in [self.pool.submit(once), self.pool.submit(once)]]
+        if votes.count("leak") >= 2:
+            return "leak"
+        if votes.count("safe") >= 1:
+            return "safe"
+        return "error"
 
     # ---- guesses and reveals -----------------------------------------------
 
@@ -385,6 +409,8 @@ class Game:
         if result:
             row["model"] = result.get("model")
             row["cost"] = float(result["usage"].get("cost") or 0)
+            if result.get("retried_after"):
+                row["retried_after"] = result["retried_after"]
         if self.cfg.get("log_messages"):
             if message is not None:
                 row["message"] = message

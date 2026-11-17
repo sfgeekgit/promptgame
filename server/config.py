@@ -34,6 +34,7 @@ DEFAULTS = {
             "model": "anthropic/claude-haiku-5.5",
             "reasoning": {"enabled": False},
             "fallback_model": "anthropic/claude-haiku-4.5",
+            "if_empty": {"model": "anthropic/claude-haiku-4.5", "max_tokens": 300},
             "max_tokens": 300,
             "timeout": 20,
         },
@@ -45,6 +46,10 @@ DEFAULTS = {
             "fallback_model": "anthropic/claude-haiku-4.5",
             "fallback_reasoning": {"effort": "medium"},
             "fallback_max_tokens": 4000,
+            # With thinking on, the model's safety layer sometimes refuses a
+            # message outright and returns no text. The same model without
+            # thinking answers it, quickly.
+            "if_empty": {"model": "anthropic/claude-haiku-5.5", "reasoning": {"enabled": False}, "max_tokens": 300},
             "max_tokens": 2500,
             "timeout": 40,
         },
@@ -53,6 +58,9 @@ DEFAULTS = {
             "model": "anthropic/claude-haiku-5.5",
             "reasoning": {"enabled": False},
             "fallback_model": "anthropic/claude-haiku-4.5",
+            # The main model refuses to read some replies (encoded text, for
+            # one). The older model reads them, but talks before it rules.
+            "if_empty": {"model": "anthropic/claude-haiku-4.5", "max_tokens": 250},
             "max_tokens": 10,
             "timeout": 12,
         },
