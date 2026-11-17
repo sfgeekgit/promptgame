@@ -239,8 +239,10 @@ class Game:
         else:
             msgs.append({"role": "user", "content": turn})
         quill = None
-        if "quill" in guard_ids and guards.wants_remembering(message):
-            quill = self.pool.submit(self._quill, message)      # writes while the wizard talks
+        if "quill" in guard_ids:
+            # The quill listens to every message and decides for itself whether
+            # the visitor asked him to remember something. It works while the wizard talks.
+            quill = self.pool.submit(self._quill, message)
         brain = self.cfg.get("level_brains", {}).get(level_id) or level.get("brain", "wizard")
         try:
             r = self.ask(brain, msgs)
@@ -297,13 +299,13 @@ class Game:
         return out
 
     def _quill(self, message):
-        """Turn 'remember that...' into a note in the wizard's own voice."""
+        """A note in the wizard's own voice if the visitor asked him to
+        remember something (however they spelled it), otherwise None."""
         try:
-            text = self.ask("judge", guards.quill_messages(message), max_tokens=80)["text"]
+            text = self.ask("judge", guards.quill_messages(message), max_tokens=120)["text"]
         except llm.LLMError:
             return None
-        note = " ".join(text.strip().strip('"').split())
-        return note[:200] or None
+        return guards.parse_quill(text)
 
     def _judge(self, secret, reply, strict):
         """Ask the Judge. A clear "safe" on the first reading stands. Anything
